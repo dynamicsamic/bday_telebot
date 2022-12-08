@@ -1,11 +1,13 @@
+#!/home/sammi/.pyenv/shims/python
+
 import logging
 import logging.config
 import os
 import time
 import datetime as dt
-from typing import List
+from typing import List, Tuple
 import csv
-
+import sys
 
 
 import telegram
@@ -231,33 +233,46 @@ def main():  # noqa: C901
             time.sleep(RETRY_TIME)
 
 '''
-def load_dates_from_excel(path: str):
-    pass
 
-def get_bdays(file_path: str) -> List[dict]:
+FILE_PATH = '/home/sammi/Dev/bday_telebot/b_days.csv'
+DAY_KEY = 'Дата'
+MONTH_KEY = 'месяц'
+
+def get_congrat_people(file_path: str, bot: telegram.Bot) -> Tuple[List[dict]]:
+    '''Get names of people to be congratulated.
+
+    Iterate through rows of a csv file and populate two lists:
+    1. People to be congratulated today.
+    2. People to be congratulated in three days.
+
+    When something goes wrong, send a message via telegram bot and exit.'''
+
     today_notifications = []
     three_days_notifications = []
     today = dt.date.today()
-    #current_year = dt.date.today().year
+    error_message = 'Could not parse input file. Wrong format. Need action'
+
     with open(file_path) as csv_file:
         reader = csv.DictReader(csv_file)
         for row in reader:
-            day = row['Дата']
-            if not day.isdecimal():
+            day = row[DAY_KEY]
+            month = _get_month(row[MONTH_KEY].lower())
+            if not day.isdecimal() or not isinstance(month, int):
                 continue
-            month = get_month(row['месяц'].lower())
             try:
                 date = dt.date(year=today.year, month=month, day=int(day))
             except TypeError as e:
-                logger.error('Could not parse input file. Wrong format')    
+                logger.error(error_message)
+                send_message(bot, error_message)
+                sys.exit(1)
             if date == today:
-                today_notifications.append(row)
+                today_notifications.append(_get_formatted_bday_message(row))
             elif date - today == dt.timedelta(days=3):
-                three_days_notifications.append(row)
-    print(today_notifications)
-    print(three_days_notifications)
+                three_days_notifications.append(_get_formatted_bday_message(row))
+    return today_notifications, three_days_notifications
 
-def get_month(month: str) -> int:
+def _get_month(month: str) -> int:
+    '''Return an integer mapping to a month.'''
     return {
         'январь': 1,
         'февраль': 2,
@@ -273,23 +288,25 @@ def get_month(month: str) -> int:
         "декабрь": 12
     }.get(month)
 
-def get_formatted_bday_message(data: dict) -> str:
-    age = ''
-    name = data.get('name', 'Unknown name')
-    #organization = data.get('organization', 'Unknown organization')
-    if year := data.get('year'):
-        age = dt.date.today().year - year
-        age = f''
+def _get_formatted_bday_message(data: dict) -> str:
+    '''Return a formatted info message.'''
+    age = 'неизвестно'
+    name = data.get('ФИО', 'Неизвестный партнер')
+    if year := data.get('год'):
+        if year.isdecimal():
+            age = dt.date.today().year - int(year)
+    return f'ФИО: {name}, возраст: {age}'
 
-'''
+
+
 def main():
-    message = f''
     bot = telegram.Bot(TELEGRAM_TOKEN)
-    return send_message(bot, 'hello!')
-'''
+    today_notifications, three_days_notifications = get_congrat_people(FILE_PATH, bot)
+    send_message(bot, f'Дни рождения сегодня: {today_notifications}')
+    send_message(bot, f'Дни рождения через 3 дня: {three_days_notifications}')
 
 
 
 if __name__ == '__main__':
-    get_bdays('/home/sammi/Dev/bday_telebot/b_days.csv')
-    #main()
+    #get_congrat_people('/home/sammi/Dev/bday_telebot/b_days.csv')
+    main()
