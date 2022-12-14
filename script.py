@@ -1,4 +1,3 @@
-#!/home/sammi/.pyenv/shims/python
 
 import logging
 import logging.config
@@ -13,8 +12,8 @@ import sys
 import telegram
 from dotenv import load_dotenv
 from telegram.error import TelegramError
-
-
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 
 load_dotenv()
 
@@ -233,10 +232,20 @@ def main():  # noqa: C901
             time.sleep(RETRY_TIME)
 
 '''
-
+TIME_URL = "http://worldtimeapi.org/api/timezone/Europe/Moscow"
+DATE_FORMAT = '%Y-%m-%d'
 FILE_PATH = '/home/sammi/Dev/bday_telebot/b_days.csv'
 DAY_KEY = 'Дата'
 MONTH_KEY = 'месяц'
+import requests
+
+def current_date(time_url: str = TIME_URL) -> dt.datetime:
+    try:
+        resp = requests.get(time_url).json()
+    except Exception:
+        return dt.datetime.today()
+    date = resp.get('datetime')[:10]
+    return dt.datetime.strptime(date, DATE_FORMAT)
 
 def get_congrat_people(file_path: str, bot: telegram.Bot) -> Tuple[List[dict]]:
     '''Get names of people to be congratulated.
@@ -249,7 +258,8 @@ def get_congrat_people(file_path: str, bot: telegram.Bot) -> Tuple[List[dict]]:
 
     today_notifications = []
     three_days_notifications = []
-    today = dt.date.today()
+    #today = dt.date.today()
+    today = current_date()
     error_message = 'Could not parse input file. Wrong format. Need action'
 
     with open(file_path) as csv_file:
@@ -298,15 +308,25 @@ def _get_formatted_bday_message(data: dict) -> str:
     return f'ФИО: {name}, возраст: {age}'
 
 
-
+#scheduler = BackgroundScheduler()
+#@scheduler.scheduled_job(IntervalTrigger(seconds=5))
 def main():
     bot = telegram.Bot(TELEGRAM_TOKEN)
     today_notifications, three_days_notifications = get_congrat_people(FILE_PATH, bot)
     send_message(bot, f'Дни рождения сегодня: {today_notifications}')
     send_message(bot, f'Дни рождения через 3 дня: {three_days_notifications}')
 
+#scheduler.start()
+cron = BackgroundScheduler()
+cron.start()
+cron.add_job(main, 'interval', seconds=5)
+while True:
+    time.sleep(20)
+#if __name__ == '__main__':
+#    #scheduler = BackgroundScheduler()
+#    #scheduler.start()
+#    #scheduler.add_job(main, 'interval', seconds=1)
+#    print('Press Ctrl+{0} to exit'.format('Break' if os.name == 'nt' else 'C'))
+#    #get_congrat_people('/home/sammi/Dev/bday_telebot/b_days.csv')
+#    #main()
 
-
-if __name__ == '__main__':
-    #get_congrat_people('/home/sammi/Dev/bday_telebot/b_days.csv')
-    main()
