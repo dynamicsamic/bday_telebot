@@ -1,64 +1,44 @@
-
-import logging
-import logging.config
-import os
-import time
-import datetime as dt
-from typing import List, Tuple
 import csv
+import datetime as dt
+import logging
+import os
+import re
 import sys
+import time
+from logging.config import fileConfig
+from typing import List, Tuple
 
-
-import telegram
-from dotenv import load_dotenv
-from telegram.error import TelegramError
+import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from dotenv import load_dotenv
+from telegram import Bot
+from telegram.error import TelegramError
+from telegram.message import Message
 
 load_dotenv()
 
-logging.config.fileConfig(
-    fname='log_config.conf',
-    disable_existing_loggers=False
-)
+fileConfig(fname="log_config.conf", disable_existing_loggers=False)
 
 logger = logging.getLogger(__name__)
 
 
-PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-
-
-HOMEWORK_VERDICTS = {
-    'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',
-    'reviewing': 'Работа взята на проверку ревьюером.',
-    'rejected': 'Работа проверена: у ревьюера есть замечания.'
-}
-
-
-EXPECTED_HOMEWORK_KEYS = {
-    'homework_name',
-    'lesson_name',
-    'date_updated',
-    'id',
-    'status',
-    'reviewer_comment',
-}
-
-
+'''
 def send_message(bot: telegram.bot, message: str) -> telegram.message.Message:
     """Отправка сообщения в телеграм через бота."""
     try:
         sent_message = bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
     except TelegramError as error:
-        logger.exception(f'Ошибка отправки сообщения через бота: {error}')
+        logger.exception(f"Ошибка отправки сообщения через бота: {error}")
     else:
-        logger.info(f'Бот отправил сообщение с текстом: {message}')
+        logger.info(f"Бот отправил сообщение с текстом: {message}")
         return sent_message
 
-'''
+
+
 def get_api_answer(current_timestamp: int) -> dict:
     """
     Функция отправки запроса к API.
@@ -233,100 +213,161 @@ def main():  # noqa: C901
 
 '''
 TIME_URL = "http://worldtimeapi.org/api/timezone/Europe/Moscow"
-DATE_FORMAT = '%Y-%m-%d'
-FILE_PATH = '/home/sammi/Dev/bday_telebot/b_days.csv'
-DAY_KEY = 'Дата'
-MONTH_KEY = 'месяц'
-import requests
-
-def current_date(time_url: str = TIME_URL) -> dt.datetime:
-    try:
-        resp = requests.get(time_url).json()
-    except Exception:
-        return dt.datetime.today()
-    date = resp.get('datetime')[:10]
-    return dt.datetime.strptime(date, DATE_FORMAT)
-
-def get_congrat_people(file_path: str, bot: telegram.Bot) -> Tuple[List[dict]]:
-    '''Get names of people to be congratulated.
-
-    Iterate through rows of a csv file and populate two lists:
-    1. People to be congratulated today.
-    2. People to be congratulated in three days.
-
-    When something goes wrong, send a message via telegram bot and exit.'''
-
-    today_notifications = []
-    three_days_notifications = []
-    #today = dt.date.today()
-    today = current_date()
-    error_message = 'Could not parse input file. Wrong format. Need action'
-
-    with open(file_path) as csv_file:
-        reader = csv.DictReader(csv_file)
-        for row in reader:
-            day = row[DAY_KEY]
-            month = _get_month(row[MONTH_KEY].lower())
-            if not day.isdecimal() or not isinstance(month, int):
-                continue
-            try:
-                date = dt.date(year=today.year, month=month, day=int(day))
-            except TypeError as e:
-                logger.error(error_message)
-                send_message(bot, error_message)
-                sys.exit(1)
-            if date == today:
-                today_notifications.append(_get_formatted_bday_message(row))
-            elif date - today == dt.timedelta(days=3):
-                three_days_notifications.append(_get_formatted_bday_message(row))
-    return today_notifications, three_days_notifications
-
-def _get_month(month: str) -> int:
-    '''Return an integer mapping to a month.'''
-    return {
-        'январь': 1,
-        'февраль': 2,
-        "март": 3,
-        "апрель": 4,
-        'май': 5,
-        "июнь": 6,
-        "июль": 7,
-        "август": 8,
-        "сентябрь": 9,
-        "октябрь": 10,
-        "ноябрь": 11,
-        "декабрь": 12
-    }.get(month)
-
-def _get_formatted_bday_message(data: dict) -> str:
-    '''Return a formatted info message.'''
-    age = 'неизвестно'
-    name = data.get('ФИО', 'Неизвестный партнер')
-    if year := data.get('год'):
-        if year.isdecimal():
-            age = dt.date.today().year - int(year)
-    return f'ФИО: {name}, возраст: {age}'
+DATE_FORMAT = "%Y-%m-%d"
+FILE_PATH = "/home/sammi/Dev/bday_telebot/b_days.csv"
+DAY_KEY = "Дата"
+MONTH_KEY = "месяц"
 
 
-#scheduler = BackgroundScheduler()
-#@scheduler.scheduled_job(IntervalTrigger(seconds=5))
+class BirthdayBotMixin:
+    TIME_URL = "http://worldtimeapi.org/api/timezone/Europe/Moscow"
+    # FILE_PATH = "/home/sammi/Dev/bday_telebot/b_days.csv"
+    DAY_KEY = "Дата"
+    MONTH_KEY = "месяц"
+    YEAR_KEY = "год"
+    NAME_KEY = "ФИО"
+
+    def get_congrat_people(self, file_path: str) -> Tuple[List[dict]]:
+        """Get names of people to be congratulated.
+
+        Iterate through rows of a csv file and populate two lists:
+        1. People to be congratulated today.
+        2. People to be congratulated in three days.
+
+        When something goes wrong, send a message via telegram bot and exit."""
+
+        today_notifications = []
+        three_days_notifications = []
+        # today = dt.date.today()
+        today = self._get_current_date()
+        error_message = "Could not parse input file. Wrong format. Need action"
+
+        with open(file_path) as csv_file:
+            reader = csv.DictReader(csv_file)
+            for row in reader:
+                day = row[self.DAY_KEY]
+                month = self._get_month(row[self.MONTH_KEY].lower())
+                if not day.isdecimal() or not isinstance(month, int):
+                    continue
+                try:
+                    date = dt.date(year=today.year, month=month, day=int(day))
+                except TypeError as e:
+                    logger.error(error_message)
+                    self._send_message(error_message)
+                    sys.exit(1)
+                if date == today:
+                    today_notifications.append(
+                        self._get_formatted_bday_message(row, today)
+                    )
+                elif date - today == dt.timedelta(days=3):
+                    three_days_notifications.append(
+                        self._get_formatted_bday_message(row, today)
+                    )
+        return today_notifications, three_days_notifications
+
+    def _get_current_date(self) -> dt.date:
+        today = dt.date.today()
+        try:
+            resp = requests.get(self.TIME_URL).json()
+        except Exception:
+            logger.warning(
+                "Не удалось получить ответ от стороннего API. "
+                "Текущая дата будет задана операционной системой."
+            )
+            resp = {}
+            # return dt.datetime.today()
+        if date := resp.get("datetime"):
+            # date = self._truncate_datetime(date)
+            # today = dt.date.fromisoformat(date)
+            today = self._truncate_datetime(date)
+        return today
+        # return dt.datetime.fromisoformat(date)
+
+    @staticmethod
+    def _truncate_datetime(dt_string: str) -> dt.date:
+        """Target format: `2022-12-15T00:03:42.431581+03:00`"""
+        regex = "[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+        if not re.match(regex, dt_string):
+            logger.error(
+                "datetime string does not conform to specified format"
+            )
+            sys.exit(1)
+        date, _ = dt_string.split("T")
+        return dt.date.fromisoformat(date)
+
+    def _get_month(self, month: str) -> int:
+        """Return an integer mapping to a month."""
+        return {
+            "январь": 1,
+            "февраль": 2,
+            "март": 3,
+            "апрель": 4,
+            "май": 5,
+            "июнь": 6,
+            "июль": 7,
+            "август": 8,
+            "сентябрь": 9,
+            "октябрь": 10,
+            "ноябрь": 11,
+            "декабрь": 12,
+        }.get(month)
+
+    def _send_message(self, message: str) -> Message:
+        """Отправка сообщения в телеграм через бота."""
+        try:
+            sent_message = self.send_message(
+                chat_id=TELEGRAM_CHAT_ID, text=message
+            )
+        except TelegramError as error:
+            logger.exception(f"Ошибка отправки сообщения через бота: {error}")
+        else:
+            logger.info(f"Бот отправил сообщение с текстом: {message}")
+            return sent_message
+
+    def _get_formatted_bday_message(
+        self, data: dict, today: dt.date = None
+    ) -> str:
+        """Return a formatted info message."""
+        today = today or dt.date.today()
+        age = "неизвестно"
+        name = data.get(self.NAME_KEY, "Неизвестный партнер")
+        day = data.get(self.DAY_KEY)
+        month = data.get(self.MONTH_KEY)
+        if year := data.get(self.YEAR_KEY):
+            if year.isdecimal():
+                age = today.year - int(year)
+        return f"{name}, {month}-{day}, возраст: {age}"
+
+
+class BirthdayBot(Bot, BirthdayBotMixin):
+    pass
+
+
+# scheduler = BackgroundScheduler()
+# @scheduler.scheduled_job(IntervalTrigger(seconds=5))
 def main():
-    bot = telegram.Bot(TELEGRAM_TOKEN)
-    today_notifications, three_days_notifications = get_congrat_people(FILE_PATH, bot)
-    send_message(bot, f'Дни рождения сегодня: {today_notifications}')
-    send_message(bot, f'Дни рождения через 3 дня: {three_days_notifications}')
+    bot = BirthdayBot(TELEGRAM_TOKEN)
+    today_notifications, three_days_notifications = bot.get_congrat_people(
+        FILE_PATH
+    )
+    if today_notifications:
+        bot._send_message(f"Дни рождения сегодня: {today_notifications}")
+    if three_days_notifications:
+        bot._send_message(
+            f"Дни рождения через 3 дня: {three_days_notifications}"
+        )
 
-#scheduler.start()
+
+# scheduler.start()
 cron = BackgroundScheduler()
 cron.start()
-cron.add_job(main, 'interval', seconds=5)
+cron.add_job(main, "interval", seconds=5)
 while True:
     time.sleep(20)
-#if __name__ == '__main__':
+# if __name__ == '__main__':
 #    #scheduler = BackgroundScheduler()
 #    #scheduler.start()
 #    #scheduler.add_job(main, 'interval', seconds=1)
 #    print('Press Ctrl+{0} to exit'.format('Break' if os.name == 'nt' else 'C'))
 #    #get_congrat_people('/home/sammi/Dev/bday_telebot/b_days.csv')
 #    #main()
-
