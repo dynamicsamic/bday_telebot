@@ -6,9 +6,11 @@ import re
 import sys
 import time
 from logging.config import fileConfig
+from pathlib import Path
 from typing import List, Tuple
 
 import requests
+import yadisk
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from dotenv import load_dotenv
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+BASE_DIR = Path(__file__).resolve()
 
 '''
 def send_message(bot: telegram.bot, message: str) -> telegram.message.Message:
@@ -212,6 +215,27 @@ def main():  # noqa: C901
             time.sleep(RETRY_TIME)
 
 '''
+
+
+def get_file_from_yadisk(bot: Bot, token: str, path: str):
+    disk = yadisk.YaDisk(token=token)
+    file_name = "temp.csv"
+    if not disk.check_token():
+        # add later: generate new token
+        error_message = "Invalid yadisk token"
+        logger.error(error_message)
+        bot._send_message(error_message)
+        sys.exit(1)
+    try:
+        file = disk.download(src_path=path, path_or_file=BASE_DIR / file_name)
+    except Exception as e:
+        error_message = f"File download failure: {e}"
+        logger.error(error_message)
+        bot._send_message(error_message)
+        sys.exit(1)
+    return file_name
+
+
 TIME_URL = "http://worldtimeapi.org/api/timezone/Europe/Moscow"
 DATE_FORMAT = "%Y-%m-%d"
 FILE_PATH = "/home/sammi/Dev/bday_telebot/b_days.csv"
@@ -259,7 +283,7 @@ class BirthdayBotMixin:
                     today_notifications.append(
                         self._get_formatted_bday_message(row, today)
                     )
-                elif date - today == dt.timedelta(days=3):
+                elif date - today == dt.timedelta(days=2):
                     three_days_notifications.append(
                         self._get_formatted_bday_message(row, today)
                     )
@@ -336,7 +360,7 @@ class BirthdayBotMixin:
         if year := data.get(self.YEAR_KEY):
             if year.isdecimal():
                 age = today.year - int(year)
-        return f"{name}, {month}-{day}, возраст: {age}"
+        return "\n" + f"/* {name}, {month}-{day}, возраст: {age} */"
 
 
 class BirthdayBot(Bot, BirthdayBotMixin):
@@ -353,6 +377,8 @@ def main():
     if today_notifications:
         bot._send_message(f"Дни рождения сегодня: {today_notifications}")
     if three_days_notifications:
+        three_days_notifications = "\n".join(three_days_notifications)
+        # three_days_notifications = "\n" + three_days_notifications
         bot._send_message(
             f"Дни рождения через 3 дня: {three_days_notifications}"
         )
@@ -371,3 +397,15 @@ while True:
 #    print('Press Ctrl+{0} to exit'.format('Break' if os.name == 'nt' else 'C'))
 #    #get_congrat_people('/home/sammi/Dev/bday_telebot/b_days.csv')
 #    #main()
+
+"""
+token='y0_AgAAAAAQgIL4AAj5pAAAAADZFT62L4mOKRpsSS-2q3bU_UhqPi8K68c'
+
+Порядок работы скрипта.
+1. Создать экземпляр диска с токеном
+2. Проверить токен.
+3. Получить файл с диска.
+4. Обработать файл.
+5. Отправить результаты в ТГ.
+
+"""
