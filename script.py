@@ -27,40 +27,10 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-BASE_DIR = Path(__file__).resolve()
+YADISK_TOKEN = os.getenv("YADISK_TOKEN")
+BASE_DIR = Path(__file__).resolve().parent
 
 '''
-def send_message(bot: telegram.bot, message: str) -> telegram.message.Message:
-    """Отправка сообщения в телеграм через бота."""
-    try:
-        sent_message = bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-    except TelegramError as error:
-        logger.exception(f"Ошибка отправки сообщения через бота: {error}")
-    else:
-        logger.info(f"Бот отправил сообщение с текстом: {message}")
-        return sent_message
-
-
-
-def get_api_answer(current_timestamp: int) -> dict:
-    """
-    Функция отправки запроса к API.
-    Если статус-код полученного ответа = 200, функциия возвращает
-    ответ от API в виде словаря.
-    Если код ответа отличается, будет вызвано ислючение.
-    """
-    timestamp = current_timestamp or int(time.time())
-    params = {'from_date': timestamp}
-    try:
-        response = requests.get(ENDPOINT, headers=HEADERS, params=params)
-    except RequestException as error:
-        logger.exception(
-            f'Эндпоинт "{ENDPOINT}" недоступен по причине: {error}'
-        )
-    else:
-        raise_if_not_200(response, ENDPOINT)
-        return response.json()
-
 
 def check_response(response: dict) -> list:
     """
@@ -217,7 +187,7 @@ def main():  # noqa: C901
 '''
 
 
-def get_file_from_yadisk(bot: Bot, token: str, path: str):
+def get_file_from_yadisk(bot: Bot, token: str, path: str) -> str:
     disk = yadisk.YaDisk(token=token)
     file_name = "temp.csv"
     if not disk.check_token():
@@ -227,9 +197,10 @@ def get_file_from_yadisk(bot: Bot, token: str, path: str):
         bot._send_message(error_message)
         sys.exit(1)
     try:
-        file = disk.download(src_path=path, path_or_file=BASE_DIR / file_name)
+        disk.download(src_path=path, path_or_file=str(BASE_DIR / file_name))
+        logger.info("Yadisk file download SUCCESS!")
     except Exception as e:
-        error_message = f"File download failure: {e}"
+        error_message = f"Yadisk file download failure: {e}"
         logger.error(error_message)
         bot._send_message(error_message)
         sys.exit(1)
@@ -241,6 +212,7 @@ DATE_FORMAT = "%Y-%m-%d"
 FILE_PATH = "/home/sammi/Dev/bday_telebot/b_days.csv"
 DAY_KEY = "Дата"
 MONTH_KEY = "месяц"
+YADISK_FILEPATH = "disk:/bday/b_days.csv"
 
 
 class BirthdayBotMixin:
@@ -251,7 +223,7 @@ class BirthdayBotMixin:
     YEAR_KEY = "год"
     NAME_KEY = "ФИО"
 
-    def get_congrat_people(self, file_path: str) -> Tuple[List[dict]]:
+    def get_congrat_people(self) -> Tuple[List[dict]]:
         """Get names of people to be congratulated.
 
         Iterate through rows of a csv file and populate two lists:
@@ -262,11 +234,12 @@ class BirthdayBotMixin:
 
         today_notifications = []
         three_days_notifications = []
-        # today = dt.date.today()
         today = self._get_current_date()
         error_message = "Could not parse input file. Wrong format. Need action"
 
-        with open(file_path) as csv_file:
+        file_name = get_file_from_yadisk(self, YADISK_TOKEN, YADISK_FILEPATH)
+
+        with open(BASE_DIR / file_name) as csv_file:
             reader = csv.DictReader(csv_file)
             for row in reader:
                 day = row[self.DAY_KEY]
@@ -360,31 +333,25 @@ class BirthdayBotMixin:
         if year := data.get(self.YEAR_KEY):
             if year.isdecimal():
                 age = today.year - int(year)
-        return "\n" + f"/* {name}, {month}-{day}, возраст: {age} */"
+        return "\n" + f"/* {name}, {day:>02}-{month}, возраст: {age} */"
 
 
 class BirthdayBot(Bot, BirthdayBotMixin):
     pass
 
 
-# scheduler = BackgroundScheduler()
-# @scheduler.scheduled_job(IntervalTrigger(seconds=5))
 def main():
     bot = BirthdayBot(TELEGRAM_TOKEN)
-    today_notifications, three_days_notifications = bot.get_congrat_people(
-        FILE_PATH
-    )
+    today_notifications, three_days_notifications = bot.get_congrat_people()
     if today_notifications:
         bot._send_message(f"Дни рождения сегодня: {today_notifications}")
     if three_days_notifications:
         three_days_notifications = "\n".join(three_days_notifications)
-        # three_days_notifications = "\n" + three_days_notifications
         bot._send_message(
             f"Дни рождения через 3 дня: {three_days_notifications}"
         )
 
 
-# scheduler.start()
 cron = BackgroundScheduler()
 cron.start()
 cron.add_job(main, "interval", seconds=5)
@@ -399,7 +366,6 @@ while True:
 #    #main()
 
 """
-token='y0_AgAAAAAQgIL4AAj5pAAAAADZFT62L4mOKRpsSS-2q3bU_UhqPi8K68c'
 
 Порядок работы скрипта.
 1. Создать экземпляр диска с токеном

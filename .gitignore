@@ -134,3 +134,5 @@ dmypy.json
 # vscode
 .vscode/
 
+# trash / temporary code
+trash.py
